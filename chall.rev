@@ -1,0 +1,797 @@
+# entry point
+# read flag
+
+# mem:
+# inp :             0 - 175
+# inp_len_check:  175 - 184
+# matrix_mult:    184 - 359
+# matrix_check:   360 - 535
+# det_check:      536 - 599
+# det:            564
+
+# (89) print "key: "
+IMMD 46 8858879218408
+SVCD 6 0
+# int8 inp[]
+SVCD 1 1
+
+# 20 @ 89
+# loop
+# stg key -> [0;170] 
+# i
+IMMD 5 0
+
+store_loop:
+
+# global[ctr * 7:] = buf[0:8]
+LDRD 8 5   # buf[0:8]
+IMMD 6 0   # padding
+LDRD 5 14  # ctr
+MULDL 5 7   # -> (10 + 6 bit) ctr * 7 
+STRD 8 0   # -> drop higher 8
+STG 8
+
+# pop buf[0:8]
+STRDL 5 3
+POPD 2 3
+# ++ctr
+ADDD 5 1
+DUPD 3 5
+SUBD 5 25
+BEQD 5 store_loop_end
+JMPD 7 store_loop
+# 
+store_loop_end:
+# #check for trailing charackters
+STGD 8 175
+DATD 12 1107
+POPD 5 25
+# IMMDL 46 8858879218408
+# SVCD 6 0
+
+IMMD 7 127 # det res
+IMMD 16 main_end
+JMPD 16 matrix_mult
+main_end:
+# IMMD 16 main_after_print
+# JMPD 16 print_mat
+# main_after_print:
+SVCD 7 2
+IMM 1
+
+############################ INV 127 ##########################
+
+inv_it:
+# a == 1 ?
+LDRD 7 16         
+SUBD 7 1          
+BEQD 7 inv_one
+JMPDL 10 inv_work
+inv_one:
+# a == 1
+# ret
+JMP 16
+inv_work:
+# a != 1
+IMMD 4 0    # p:4
+LDRD 7 20   # a:7
+IMMD 7 127  # b:7
+
+inv_loop:
+# debug print
+#DUPD 5 18
+#SVCD 18 2
+
+# top & 1
+# leaves 7 bits on stack
+LDRD 8 14  # 8
+IMMD 7 0   # 15
+BEQD 8 inv_top_even
+# p:5 a:7 b:7 _:7
+# top & 1
+# resize stack
+DUPD 5 25  # 25
+POPD 3 7   # 18
+STRD 18 0  # 0
+
+# a;b
+DUPD 4 14  # 14
+# a / b; a % b
+DIV 7      # 14
+STRD 7 25  # 7
+STRD 7 7   # 0
+JMPD 11 inv_loop_common
+
+inv_top_even:
+# top & 1 == 0
+#resize stack
+# p:4 a:7 b:7 _:7
+DUPD 5 25  # 25
+POPD 3 7   # 18
+STRD 18 0  # 0
+
+# b;a
+DUPD 3 7   # 7
+LDRD 7 14  # 14
+# b / a; b % a
+DIV 7      # 14
+STRD 7 25  # 7
+STRD 7 0   # 0
+
+inv_loop_common:
+# p:4 a:7 b:7
+# n += 1
+# 1 << 14
+ADDD 18 16384
+# b == 1
+DUPD 3 7  # 7
+SUBDL 7 1 # 7
+BEQD 7 inv_loop_end
+# a == 1
+LDRD 7 7  # 7
+SUBD 7 1  # 7
+BEQD 7 inv_loop_end
+JMPDL 10 inv_loop
+
+inv_loop_end:
+# debug print
+# DUPD 5 18
+# SVCD 18 2
+
+# a = stack.pop()
+# p:4 a:7 b:7
+LDRD 7 18   # 7
+STRD 7 7    # 0
+DUPD 5 18   # 18
+STRD 18 7   # 0
+# fused 7 bit from pop and b := 1
+POPDL 4 14  # - 14
+# p:4 a:7 b:7
+# b = 1
+# POPD 3 7
+IMMD 7 1    # := 0
+# n << 6
+LDRD 7 11   # 7
+MULD 3 0    # 10
+
+# stack[n'>>6]; n:4 ; a:7 ; b:7 ; n':10
+inv_ext_loop:
+# --n
+# 1 << 6
+SUBD 10 64  # 
+
+# n != 0
+DUPD 4 10
+BEQD 10 inv_ext_loop_end
+
+# debug print
+# DUPD 5 24
+# SVCD 24 2
+
+# a * stack.top()
+LDRD 7 28
+
+# debug
+# DUPD 3 7
+# SVCD 7 2
+
+LDRD 7 24
+MUL 7
+# + b
+LDRD 7 24
+ADD 7
+
+LDRD 7 31
+
+# st ; n ; a ; b ; n' ; a * st.top() + b ; a
+STRD 14 17
+LDRD 28 7
+STRDL 28 14
+POPD 4 14
+JMPDL 11 inv_ext_loop
+
+inv_ext_loop_end:
+POPD 5 17
+# arg ; ret ; n:4 ; a:7
+LDRD 4 7
+IMMD 8 0
+BEQD 9 inv_ext_no_sub
+IMMD 7 127
+LDRD 7 10
+SUB 7
+JMPD 11 inv_ext_fin
+inv_ext_no_sub:
+LDRD 7 3
+inv_ext_fin:
+STRD 7 30
+POPD 5 14
+JMP 16
+
+########################## DETERMINANTE ##############################
+
+det:
+# d = 0
+# i = 0
+IMMD 8 0
+det_loop_i:
+# j = i + 1
+DUPD 3 4
+ADDD 4 1
+det_loop_j:
+#DUPD 4 8
+#SVCD 8 2
+#IMMD 16 det_loop_j_past_print
+#JMPD 16 print_mat
+#det_loop_j_past_print:
+# d:4 i:4 j:4
+IMMD 9 0  # 9          0:9
+LDRD 4 13 # 13         i:13
+MULD 8 42 # 21   7(5i+i):21
+LDG 8     # 21   1?<<8|m[i][i]:21
+STRD 7 7  # 14   m[i][i]:7 1?<<8:7
+POPD 3 7  # 7    m[i][i]:7
+DUPD 3 7  # 14   m[i][i]:7 m[i][i]:7
+
+# DUPD 3 7
+# SVCD 7 2
+# IMMD 7 84
+# SVCD 3 0
+
+IMMD 4 0  # 18   m[i][i]:7 m[i][i]:7 0:4
+BEQD 11 det_eq_0
+
+# m[i][i] != 0
+# d:4 i:4 j:4 m[i][i]:7
+# inv = m[i][i] **-1
+IMMD 16 det_loop_j_inv_ret
+JMPD 16 inv_it
+det_loop_j_inv_ret:
+# d:4 i:4 j:4 inv:7
+# t = inv * m[j][i]
+# m[j][i]
+IMMD 10 0 # 10
+LDRD 8 17 # 18 i:14 j:4
+MULDL 4 5  # 22 i:14 5j:8
+ADD 8     # 14 (5j + i):14
+MULD 8 7  # 22 7 * (5j + i):22
+STRD 8 0  # 14 7 * (5j + i):14
+LDG 8     # 14 (0|1) << 8 | m[j][i]:14
+STRD 7 0  # 7  m[j][i]:7
+# d:4 i:4 j:4 m[i][i]^{-1}:7 m[j][i]:7
+
+# MUL_127   # 14 a:7 b:7
+MUL 7       # 14 ab:14
+DIVD 14 127 # 28 ab%127:14 ab/127:14
+POPDL 4 14   # 14 ab%127:14
+STRD 7 0    # 7  ab%127:7
+
+# d:4 i:4 j:4 t:7
+
+# k = i
+LDRD 4 11 # 4
+det_loop_k_spawn:
+# d:4 i:4 j:4 t:7 k:4
+# k == 5 ?
+IMMD 4 0 # 4
+LDRD 4 4 # 4 k:8
+SUBD 8 5 # 8
+BEQD 8 det_loop_all_spawned # 0
+# k != 5
+# ++k
+# parallel: next iteration
+ADDD 4 1 # 0
+JMPD 12 det_loop_k_spawn
+# parallel: loop body
+# postfix: IMMD 40  (16 + 24)
+DATD 12 1127 # 40
+POPD 6 40    # 0
+JMPD 12 det_loop_k_each
+det_loop_all_spawned:
+SKPD 6 54
+POPD 4 11
+# d:4 i:4 j:4
+det_loop_j_end:
+# DUPD 4 8
+# SVCD 8 2
+# ++j
+ADDD 4 1
+# j == 5?
+IMMD 7 0 # 7
+LDRD 4 7 # 11 j
+SUBD 4 5 # 11 j - 5
+BEQD 11 det_loop_i_end
+# j != 5
+JMPD 12 det_loop_j
+
+det_loop_k_each:
+
+# LDRD 7 4
+# SVCD 7 2
+# IMMD 7 84
+# SVCD 3 0
+
+# tmp = 127 + m[j][k] - t * m[i][k]
+# d:4 i:4 j:4 t:7 k:4
+# m[j][k]
+IMMD 6 0  # 6
+LDRD 4 6  # 10 k:10
+LDRD 8 21 # 18
+STRD 4 0  # 14 k:10  j:4
+MULD 4 5  # 18 k:10 5j:8
+ADD 8     # 10 5j + k:10
+MULD 7 7  # 17 7(5j + k):17
+LDG 8     # 10 1? << 8 | m[j][k]:17
+STRD 7 0  # 10 m[j][k]:10
+
+DUPD 3 7  # 17 1? << 8 | m[j][k]:10 m[j][k]:7
+STRDL 7 1  # 10 m[j][k]:9  m[j][k] & 1:1
+POPD 1 1  #  9 m[j][k]:9
+
+ADDD 9 127
+
+# m[i][k] * t
+# d:4 i:4 j:4 t:7 k:4 127 + m[j][k]:9
+IMMDL 6 0  # 6 0:6
+LDRD 4 15 # 10 k:10
+LDRD 8 34 # 18
+STRD 4 0  # 14 k:10 i:4
+MULD 4 5  # 18 k:10 5i:8
+ADD 8     # 10  (5i + k):10
+MULDL 7 7 # 17   7(5i+k):17
+LDG 8     # 10 1?<<8|m[i][k]:10
+STRD 7 0  # 10       m[i][k]:10
+
+# SKPD 3 2
+# DUPD 4 8
+# SVCD 8 2
+# IMMD 7 84
+# SVCD 3 0
+
+DUPD 3 7  # 17 1?<<8|m[i][k]:10 m[i][k]:7
+STRDL 7 1  # 10 m[i][k]:9 1?:1
+POPD 1 1  #  9 m[i][k]:9
+# d:4 i:4 j:4 t:7 k:4 127 + m[j][k]:9 m[i][k]:9
+
+IMMD 2 0
+LDRD 7 24 # 127 + m[j][k]:9 m[i][k]:9 t:9
+
+# mul 127      a:9 b:9
+MUL 9        # ab:18
+DIVDL 18 127  # ab%127:18 ab/127:18
+POPD 5 18    # ab%127:18
+STRDL 9 0     # ab%127:9
+# 127 + m[j][k]:9 m[i][k] * t:9
+
+SUB 9
+
+# res = tmp % 127
+DIVDL 9 127
+POPD 4 9
+# (127 + m[j][k] - (m[i][k] * t) % 127) % 127:9
+
+# m[j][k] = res
+# d:4 i:4 j:4 t:7 k:4 res:9
+IMMD 4 0  # 4
+LDRD 4 13 # 8 k:8
+LDRD 8 28 # 16
+STRD 4 0  # 12 k:8 j:4
+MULDL 4 5 # 16 k:8 5j:8
+ADD 8     # 8 5j+k:8
+MULD 8 7  # 16 7(5j+k):15
+STRD 8 0  # 8 &m[j][k]:8
+
+# DUPD 4 8
+# SVCD 8 2
+# IMMD 7 84
+# SVCD 3 0
+
+# d:4 i:4 j:4 t:7 k:4 res:9 &m[j][k]:8
+DUPD 4 8  # 8 &m[j][k]:8
+LDG 8     # 8 n:1 m[j][k]:7
+POPD 3 7  # 1 n:1
+LDRD 7 9  # 8 n:1 res:7
+LDRD 8 8  # 16 n:1 res:7 &m[j][k]:8
+
+STG 8     # 0
+FNC 1     # just die instead of cleaning up the stack
+#DATD 2 0
+det_eq_0:
+# IMMD 46 2834952475880
+# SVCD 6 0
+
+# m[i][i] == 0
+# d:4 i:4 j:4 m[i][i]:7 ->
+# swap(i,j)
+POPDL 3 7  #
+# d:4 i:4 j:4
+IMMD 14 0  # 14
+LDRD 4 14  # 18   j:18
+MULDL 17 35 # 35 35j:35
+
+# DUPD 4 8
+# SVCD 8 2
+# IMMD 7 84
+# SVCD 3 0
+
+
+IMMD 14 0  # 14 0:14
+LDRD 8 53  # 22
+STRD 4 0   # 18   i:18
+MULD 17 35 # 35 35i:35
+
+# DUPD 4 8
+# SVCD 8 2
+# IMMD 7 84
+# SVCD 3 0
+
+
+# d:4 i:4 j:4 &row_i:35 &row_j:35
+
+# swap
+DUPD 6 35   # 35  &row_i:35
+LDG 35      # 35  row_i
+LDRD 35 70  # 70  row_i &row_j
+DUPD 6 35   # 105 row_i &row_j &row_j
+LDG 35      # 105 row_i &row_j row_j
+LDRDL 35 105 # 140 row_i &row_j row_j &row_i
+STG 35      # 70  row_i &row_j
+STG 35      # 0
+
+POPD 7 70
+# d:4 i:4 j:4
+ADDD 12 256 # ++d
+JMPD 12 det_loop_j_end
+
+
+det_loop_i_end:
+# d:4 i:4 j:4
+POPD 3 4
+# ++i
+# d:4 i:4
+ADDD 4 1
+# i == 4 ?
+IMMD 1 0 # 1
+LDRD 4 1 # 5 i:5
+SUBD 5 4 # 5 i-4:5
+BEQD 5 det_fin
+JMPD 12 det_loop_i
+
+det_fin:
+# d:4 i:4
+POPDL 3 4
+# d:4
+# even(d) ?
+IMMD 5 0 # 9
+BEQD 6 det_d_even
+# odd(d)
+# d>>1:3
+IMMD 11 126 # 14
+JMPD 13 det_d_loaded
+det_d_even:
+# even(d)
+# d>>1:3
+IMMDL 11 1   # 14
+det_d_loaded:
+STRD 7 0 # 7
+# (even(d) ? 1 : 127) : 7
+
+# i = 0
+IMMD 7 0  # i
+det_prod_loop:
+# prod:7 i:7
+# prod *= m[i][i]
+DUPD 4 7  # 7  i:7
+MULD 7 42 # 14 7(5i + i):14
+LDG 8     # 14 1?<<8|m[i][i]:14
+STRD 7 0  # 7  m[i][i]:7
+# prod:7 i:7 m[i][i]:7
+
+LDRD 7 14
+# mul 127    # 14  a:7 b:7
+MUL 7        # 14 ab:14
+DIVD 14 127  # 28 ab%127:14 ab/127:14
+POPD 4 14    # 14 ab%127:14
+STRD 7 14     #  7 prod = ab%127:7
+POPD 3 7     #  0
+# prod:7 i:7
+
+# i == 5 ?
+ADDD 3 1
+DUPD 4 7
+SUBDL 7 5
+BEQD 7 det_prod_fin
+# i != 5
+JMPDL 13 det_prod_loop
+
+det_prod_fin:
+POPD 5 7
+STRD 7 16
+JMP 16
+
+
+######################### matrix_mult ###########################
+# a:     0 - 175
+# b:   360 - 535
+# res: 184 - 359
+matrix_mult:
+
+# i = 0
+IMMD 5 0
+# j = 0
+matrix_loop_i:
+IMMD 5 7  # j = 0b111
+matrix_loop_j:
+# i:5 j:5
+# ++j
+ADDDL 3 1
+# j == 4?
+DUPD 3 5  # 5
+MULD 3 1  # 8
+########## changed for debugging
+SUBD 3 4  # 8
+# parallel: if (++j == 4) break;
+BEQD 8 matrix_loop_j_all
+JMPD 13 matrix_loop_j
+# parallel: goto matrix_loop_each
+DATD 12 1132 # IMMD 45 _
+POPD 6 53
+JMPD 13 matrix_mult_each
+
+matrix_loop_j_all:
+# i:5 j:5
+POPD 3 5
+# ++i
+ADDD 3 1
+# i == 5?
+DUPD 3 5
+######### changed for debugging
+SUBD 5 5
+BEQD 5 matrix_loop_i_end
+JMPD 13 matrix_loop_i
+
+matrix_loop_i_end:
+# die
+IMM 1
+
+matrix_mult_each:
+# i:5 j:5
+# get row_j
+
+#SVCD 5 2
+#IMMD 9 262
+#SVCD 3 0
+#SVCD 5 2
+#IMMD 7 84
+#SVCD 3 0
+
+IMMD 4 0 # 4
+LDRDL 5 4 # 9
+#ADDD 1 0
+MULDL 9 5 # 18
+MULDL 17 7 # 35
+LDG 35    # 35 a:row_j
+
+IMMDL 4 0   # 4
+LDRD 10 44 # 14
+STRD 5 0   # 9
+#ADDD 1 0
+MULDL 9 5   # 18
+MULDL 17 7  # 35
+ADDD 11 360
+LDG 35     # b:col_i
+
+IMMD 8 0   # sum
+IMMD 4 0   # k:4
+# row_j:35 row_i:{0,7,14,21,35} sum:8 k:4
+matrix_loop_k:
+# DUPD 3 4   
+# SVCD 4 2   
+# IMMD 7 84
+# SVCD 3 0
+
+IMMD 1 0   # 1
+LDRD 7 13  # 8
+LDRD 7 55  # 15  8 + 4 + 8 + 35 
+
+# MUL_127   # 14 a:7 b:7
+MUL 7       # 14 ab:14
+DIVD 14 127 # 28 ab%127:14 ab/127:14
+POPDL 4 14  # 14 ab%127:14
+STRD 7 0    # 7  ab%127:7
+
+# sum:8 k:4 ab:8
+LDRD 8 12
+
+# add_127    16 a:8 b:8
+ADD 8      # 8 a+b:8
+DIVD 8 127 # 16 a+_{127}b:8 (a+b)/127:8
+POPD 4 8   # 8 a+_{127}b:8
+
+LDRD 4 8   # 12
+# sum_old:8 k:4 sum_new:8 k:4
+STRD 12 7  # 0
+POPD 3 7   # -7
+
+ADDD 5 1   # 0
+DUPD 2 3   # 3
+MULD 2 1   # 5
+SUBD 5 17   # 5
+
+#DUPD 3 4   
+#SVCD 4 2   
+#IMMD 7 84
+#SVCD 3 0
+
+BEQD 5 matrix_each_k_end
+JMPD 13 matrix_loop_k
+
+matrix_each_k_end:
+POPD 3 4
+# row_j:35 sum:8
+STRD 7 29
+POPD 5 29
+# i:5 j:5 sum:7
+IMMD 4 0  # 4  
+LDRD 9 11 # 13 i:8 j:5
+MULD 3 5  # 16 i:8 5j:8
+ADD 8     # 8  5j+i:8 (<30)
+MULD 5 7  # 13 7(5j+i):13
+ADDD 10 184
+
+# DUPD 4 10
+# SVCD 10 2
+# IMMD 7 84
+# SVCD 3 0
+
+# i:5 j:5 sum:7 &r[j][i]:13
+DUPD 4 10  # 10
+LDG 10     # 10
+POPD 3 7   # 3
+LDRD 7 16  # 10
+LDRD 10 10 # 20
+STG 10     # 0
+FNCDL 5 24
+POPD 5 30  # 13 + 7 + 10
+# SVCD 16 2
+# IMM 1
+
+main_post_mult:
+IMMD 10 42
+IMMD 16 post_det
+JMPD 16 det
+post_det:
+STGD 10 564
+
+# c:8 4:5 i:5
+LDGD 8 175
+IMMD 10 128
+check_loop:
+IMMD 25 0   # 25
+LDRD 10 25  # 35
+SUB 5       # 30
+
+# DUPD 3 5
+# SVCD 5 2
+# IMMD 7 84
+# SVCD 3 0
+
+MULD 5 7    # 35
+ADDD 10 536 # 35
+LDG 35      # 35
+
+# DUPD 6 35
+# SVCD 35 2
+# IMMD 7 84
+# SVCD 3 0
+
+IMMD 14 0   # 59
+IMMD 10 0
+LDRD 10 59  # 69
+STRD 5 0    # 64
+MULD 6 35   # 70
+ADDD 10 184
+LDG 35      # 70
+
+# DUPD 6 35
+# SVCD 35 2
+# IMMD 7 84
+# SVCD 3 0
+
+SUB 35      # 35
+BEQD 35 check_passed
+IMMD 4 12   # 4
+STRD 4 10   # 0
+check_passed:
+ADDD 3 1
+DUPD 3 5    # 5
+SUBD 3 5    # 5
+BEQD 5 check_end
+JMPD 14 check_loop
+
+check_end:
+POPDL 4 10
+BEQD 8 is_flag
+# not flag
+IMMD 19 164783
+JMPD 16 end_end
+is_flag:
+IMMD 19 168879
+end_end:
+SVCD 4 0
+IMMD 7 84
+SVCD 3 0
+IMM 1
+
+
+
+
+
+# IMMD 10 184
+# IMMD 16 post_print
+# JMPD 16 print_mat
+# post_print:
+# SVCD 7 2
+# IMMD 7 84
+# SVCD 3 0
+# IMMD 10 0
+# IMMD 16 post_print_2
+# JMPD 16 print_mat
+# post_print_2:
+# IMM 1
+#IMMD 10 184
+#IMMD 16 main_after_det
+#IMMD 4 0
+#LDRD 5 3    #  j:8
+#MULD 9 5    #  5j:18
+#MULD 17 7   # 35j:35
+#LDG 35      # 35 row_j:35
+#
+#LDRD 10 35
+#STRD 5 5
+#MULD 5 35
+#ADDD 10 360
+
+#IMMD 7 42 # det
+#IMMD main_after_mm
+
+
+
+######################### print_mat #############################
+
+# print_mat:
+# IMMD 18 0    # i:18
+# print_mat_loop:
+# DUPDL 5 18
+# MULD 17 35   # 7(5i + i):35
+# LDRD 10 69    # 35 + 18 + 16
+# ADD 10
+# LDG 35       # row_i
+# IMMD 10 735
+# SVCD 3 0
+# SVCD 7 2
+# IMMD 9 262
+# SVCD 3 0
+# SVCD 7 2
+# IMMD 9 262
+# SVCD 3 0
+# SVCD 7 2
+# IMMD 9 262
+# SVCD 3 0
+# SVCD 7 2
+# IMMD 9 262
+# SVCD 3 0
+# SVCD 7 2
+# IMMD 19 42463
+# SVCD 4 0
+# ADDD 3 1
+# DUPD 3 7
+# SUBD 3 5
+# BEQD 7 print_mat_end
+# JMPDL 13 print_mat_loop
+# print_mat_end:
+# IMMD 7 84
+# SVCD 3 0 
+# POPDL 5 18
+# JMP 16
+
+# TODO mul diagonal
